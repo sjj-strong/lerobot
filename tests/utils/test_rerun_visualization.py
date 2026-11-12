@@ -427,3 +427,40 @@ def test_log_rerun_blueprint_grows_with_a_late_prediction(mock_rerun):
     assert len(blueprints) == 2
     assert {v.origin for v in _views_by_kind(blueprints[-1], "TextDocumentView")} == {"prediction.subtask"}
     assert _views_by_kind(blueprints[-1], "TimeSeriesView")[0].contents == ["observation.temp"]
+
+
+@pytest.mark.parametrize("local_viewer", [True, False])
+def test_init_uses_interpreter_viewer_without_activating_venv(
+    mock_rerun, monkeypatch, tmp_path, local_viewer
+):
+    import os
+
+    rv, _, _ = mock_rerun
+    scripts = tmp_path / "venv" / "bin"
+    scripts.mkdir(parents=True)
+    interpreter = scripts / "python"
+    interpreter.symlink_to(sys.executable)
+    viewer = scripts / ("rerun.exe" if os.name == "nt" else "rerun")
+    if local_viewer:
+        viewer.write_text("")
+        viewer.chmod(0o755)
+    monkeypatch.setattr(sys, "executable", str(interpreter))
+    monkeypatch.setenv("PATH", "/other/environment/bin")
+    calls = []
+    monkeypatch.setattr(sys.modules["rerun"], "spawn", lambda **kwargs: calls.append(kwargs))
+    rv.init_rerun()
+    assert calls[0].get("executable_path") == (str(viewer) if local_viewer else None)
+    assert os.environ["PATH"] == "/other/environment/bin"
+
+
+def test_remote_viewer_does_not_spawn_local_binary(mock_rerun, monkeypatch):
+    rv, _, _ = mock_rerun
+    calls = []
+    monkeypatch.setattr(
+        sys.modules["rerun"], "spawn", lambda **kwargs: pytest.fail("Unexpected local viewer")
+    )
+    monkeypatch.setattr(
+        sys.modules["rerun"], "connect_grpc", lambda **kwargs: calls.append(kwargs), raising=False
+    )
+    rv.init_rerun(ip="127.0.0.1", port=9876)
+    assert calls == [{"url": "rerun+http://127.0.0.1:9876/proxy"}]

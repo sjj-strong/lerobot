@@ -172,3 +172,7 @@ loop. Terminal logs report state transitions and errors without per-frame dumps.
 Synchronous task reset/video saving does not refresh the viewer continuously;
 the transition remains displayed until that operation returns. Closing the
 viewer is not a robot stop command: release RB, hold View, or use Ctrl-C.
+
+The desktop backend first looks for `rerun` alongside the running Python interpreter
+(and falls back to PATH if absent). Invoking `/opt/venv/lerobot/bin/python` from a
+`(gr00t)` shell therefore needs no environment activation or PATH modification.

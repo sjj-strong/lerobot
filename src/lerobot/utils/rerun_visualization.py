@@ -22,6 +22,8 @@ importing from here directly. Requires the ``viz`` extra (``pip install 'lerobot
 import logging
 import numbers
 import os
+import sys
+from pathlib import Path
 
 import numpy as np
 
@@ -71,7 +73,10 @@ def init_rerun(
     if ip and port:
         rr.connect_grpc(url=f"rerun+http://{ip}:{port}/proxy")
     else:
-        rr.spawn(memory_limit=memory_limit)
+        # An explicit venv Python does not add its scripts directory to PATH.
+        viewer = Path(sys.executable).with_name("rerun.exe" if os.name == "nt" else "rerun")
+        viewer_path = str(viewer) if viewer.is_file() and os.access(viewer, os.X_OK) else None
+        rr.spawn(memory_limit=memory_limit, executable_path=viewer_path)
 
 
 def shutdown_rerun() -> None:

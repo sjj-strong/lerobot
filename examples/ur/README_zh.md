@@ -152,3 +152,7 @@ cd /workspace/RLinf/external/lerobot
 终端只打印状态变化和异常，不逐帧刷屏。
 同步任务复位和视频保存期间不会持续刷新界面，界面保留对应操作状态直到操作返回。
 关闭 Rerun 窗口不等于停止机械臂；停止仍使用松开 RB、长按 View 或 Ctrl-C。
+
+桌面后端优先使用当前 Python 解释器同目录的 `rerun`，不存在时才回退到 PATH。
+因此在 `(gr00t)` 终端直接执行 `/opt/venv/lerobot/bin/python` 即可，
+无需激活环境或修改 PATH。
