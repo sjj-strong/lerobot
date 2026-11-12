@@ -105,6 +105,10 @@ class UR(Robot):
         result.update({name: cam.async_read() for name, cam in self.cameras.items()})
         return result
 
+    def get_diagnostics(self) -> dict:
+        """Return display-only counters and feedback, separate from observations."""
+        return self.controller.get_diagnostics()
+
     def send_action(self, action: dict) -> dict:
         if not self.is_connected:
             raise RuntimeError("Expected connected UR")

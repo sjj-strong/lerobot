@@ -12,7 +12,7 @@ Inside the RLinf UR container, use the independent Python 3.12 environment:
 ```bash
 cd /workspace/RLinf/external/lerobot
 uv pip install --python /opt/venv/lerobot/bin/python --torch-backend cu128 \
-  'torch==2.11.0+cu128' 'torchvision==0.26.0+cu128' -e '.[ur,xbot,robotiq,dataset]'
+  'torch==2.11.0+cu128' 'torchvision==0.26.0+cu128' -e '.[ur,xbot,robotiq,dataset,viz]'
 cd /workspace/RLinf
 /opt/venv/lerobot/bin/python external/lerobot/examples/ur/teleoperate.py
 /opt/venv/lerobot/bin/python external/lerobot/examples/ur/record.py
@@ -140,3 +140,35 @@ force gain scaling 1.5, max wrench (40,40,40,4,4,4), and limits
 (0.2,0.2,0.2,0.05,0.05,0.3). The 10 s timeout also bounds stale-feedback detection;
 RB release and normal exit still request an immediate stop. Change these values
 directly in `config.py`. Cameras and task reset remain separately configurable.
+
+## Live Rerun diagnostics
+
+`DISPLAY_DATA=True` in `config.py` opens LeRobot's official Rerun backend for
+both teleoperation and recording. `DISPLAY_FPS=10` limits display updates;
+state changes bypass this limit. The container must have a working `DISPLAY`
+and X11 socket (the current UR container provides both). For a remote Rerun
+server, set both `DISPLAY_IP` and `DISPLAY_PORT`; leave both `None` to spawn a
+local desktop viewer. Use `DISPLAY_DATA=False` to run without a viewer.
+The `viz` extra is installed into `/opt/venv/lerobot`, not `gr00t`.
+
+The view contains four panels plus any configured camera images:
+
+- Target/control frequency (Hz): successful target submissions and RTDE command
+  executions divided by actual elapsed monotonic time over one-second windows.
+  These are measured rates, not the configured 30/500 Hz. Both report zero after a complete idle
+  window; a window spanning the stop can still be nonzero. The first window starts at zero.
+- Measured force: Fx, Fy, Fz in base-frame N.
+- Measured torque: Tx, Ty, Tz in base-frame Nm, including unselected force axes.
+- Status: WAITING/RUNNING/PAUSED/FAULT, effective RB enable, last UR robot/safety
+  mode and feedback age. RESETTING, SAVING, DISCARDING and STOPPED mark lifecycle
+  transitions. Unknown numeric UR modes remain visible as codes. A fault retains
+  the last feedback and reports its age rather than claiming it is current.
+
+Wrench comes from RTDE `getActualTCPForce`, not the commanded force. A gripper or
+camera is not required; wrench is displayed even if `include_wrench=False` in
+the dataset. Display values never enter dataset features or frames. The RTDE
+thread only maintains counters/cached feedback; Rerun calls run in the example
+loop. Terminal logs report state transitions and errors without per-frame dumps.
+Synchronous task reset/video saving does not refresh the viewer continuously;
+the transition remains displayed until that operation returns. Closing the
+viewer is not a robot stop command: release RB, hold View, or use Ctrl-C.

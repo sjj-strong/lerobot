@@ -53,3 +53,9 @@ REPO_ID = "local/ur"
 RESUME = False
 NUM_EPISODES = 20  # Number of new successful episodes in this invocation.
 USE_VIDEOS = True
+
+# Official LeRobot Rerun backend; None/None opens a viewer in this desktop session.
+DISPLAY_DATA = True
+DISPLAY_FPS = 10
+DISPLAY_IP = None
+DISPLAY_PORT = None

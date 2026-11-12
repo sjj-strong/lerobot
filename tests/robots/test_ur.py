@@ -397,3 +397,281 @@ def test_explicit_damping_remains_supported():
     np.testing.assert_array_equal(cfg.resolved_damping, [1, 2, 3, 4, 5, 6])
     with pytest.raises(ValueError):
         ForceConfig(stiffness=(-1, 0, 0, 0, 0, 0))
+
+
+def test_diagnostics_do_not_change_dataset_features():
+    robot = UR(URConfig(robot_ip="test", mode="cartesian_position"))
+    features = robot.observation_features.copy()
+    diagnostics = robot.get_diagnostics()
+    assert diagnostics["target_count"] == 0
+    assert diagnostics["control_count"] == 0
+    assert diagnostics["robot_mode"] is None
+    assert diagnostics["safety_mode"] is None
+    assert robot.observation_features == features
+
+
+def test_control_diagnostics_count_successful_sdk_writes():
+    import time
+
+    from lerobot.robots.ur.controller import RTDEController
+
+    class SDK:
+        writes = 0
+
+        def initPeriod(self):
+            return None
+
+        def waitPeriod(self, tick):
+            time.sleep(0.002)
+
+        def servoL(self, *args):
+            self.writes += 1
+            return True
+
+        def servoStop(self, *args):
+            return True
+
+    class Receiver(FakeReceive):
+        def getTimestamp(self):
+            return time.monotonic()
+
+    controller = RTDEController(URConfig(robot_ip="test", mode="cartesian_position"))
+    controller.receive, controller.control = Receiver(), SDK()
+    controller.send(np.zeros(6))
+    time.sleep(0.02)
+    controller.stop()
+    data = controller.get_diagnostics()
+    assert data["target_count"] == 1
+    assert data["control_count"] == controller.control.writes > 0
+    assert data["robot_mode"] == 7
+    assert data["safety_mode"] == 1
+    np.testing.assert_array_equal(data["wrench"], np.zeros(6))
+    count = data["control_count"]
+    time.sleep(0.01)
+    assert controller.get_diagnostics()["control_count"] == count
+
+
+@pytest.mark.viz
+def test_rerun_diagnostics_rates_and_six_axis_wrench(monkeypatch):
+    import importlib.util
+    from pathlib import Path
+
+    rr = pytest.importorskip("rerun")
+    path = Path(__file__).resolve().parents[2] / "examples/ur/visualization.py"
+    spec = importlib.util.spec_from_file_location("ur_visualization", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setattr(rr, "spawn", lambda **kwargs: None)
+    logged = {}
+    blueprints = []
+    send_blueprint = rr.send_blueprint
+
+    def capture_blueprint(blueprint, **kwargs):
+        blueprints.append(blueprint)
+        return send_blueprint(blueprint, **kwargs)
+
+    monkeypatch.setattr(rr, "send_blueprint", capture_blueprint)
+    original = rr.log
+
+    def capture(path, entity=None, *args, **kwargs):
+        if entity is not None and hasattr(entity, "scalars"):
+            logged[path] = entity.scalars.as_arrow_array().to_pylist()
+        return original(path, entity, *args, **kwargs)
+
+    monkeypatch.setattr(rr, "log", capture)
+    display = module.URRerunDisplay(enabled=True, fps=10)
+    memory = rr.memory_recording()
+    sample = {
+        "sampled_at": 10.0,
+        "target_count": 0,
+        "control_count": 0,
+        "wrench": np.arange(6, dtype=float),
+        "robot_mode": 7,
+        "safety_mode": 1,
+        "feedback_age_s": 0.0,
+        "error": None,
+    }
+    try:
+        display.update(sample, state="WAITING", rb=False)
+        initial_layouts = len(blueprints)
+        display.update(
+            sample | {"sampled_at": 11.0, "target_count": 30, "control_count": 500}, state="RUNNING", rb=True
+        )
+        assert len(blueprints) == initial_layouts
+        assert logged["observation.rates/target_hz"] == [30.0]
+        assert logged["observation.rates/control_hz"] == [500.0]
+        for i, name in enumerate(("Fx_N", "Fy_N", "Fz_N", "Tx_Nm", "Ty_Nm", "Tz_Nm")):
+            assert logged["observation.wrench/" + name] == [float(i)]
+        display.update(
+            sample | {"sampled_at": 12.0, "target_count": 30, "control_count": 500}, state="PAUSED", rb=False
+        )
+        assert logged["observation.rates/target_hz"] == [0.0]
+        assert logged["observation.rates/control_hz"] == [0.0]
+        assert memory.num_msgs() > 0
+    finally:
+        display.close()
+
+
+@pytest.mark.viz
+def test_viewer_failure_does_not_mask_connection_failure(tmp_path, monkeypatch):
+    import importlib.util
+    import json
+    import sys
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    from lerobot.teleoperators.xbot import XBotConfig
+
+    rr = pytest.importorskip("rerun")
+    example_dir = Path(__file__).resolve().parents[2] / "examples/ur"
+    monkeypatch.syspath_prepend(str(example_dir))
+    spec = importlib.util.spec_from_file_location("ur_session_fault", example_dir / "session.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    calibration = {
+        "version": 1,
+        "backend": "evdev",
+        "device": {"name": "test", "vendor": 1, "product": 2},
+        "axes": {
+            name: {"code": i, "rest": 0, "positive": 100, "min": -100, "max": 100}
+            for i, name in enumerate(("lx", "ly", "rx", "ry", "lt", "rt", "yaw"))
+        },
+        "buttons": {name: 300 + i for i, name in enumerate(("rb", "lb", "a", "x", "menu", "y", "b", "view"))},
+    }
+    path = tmp_path / "calibration.json"
+    path.write_text(json.dumps(calibration))
+
+    class Receive(FakeReceive):
+        def disconnect(self):
+            pass
+
+    def unavailable_robot(*args):
+        raise ConnectionError("robot unavailable")
+
+    def broken_viewer(*args, **kwargs):
+        raise RuntimeError("viewer failed")
+
+    monkeypatch.setitem(sys.modules, "rtde_control", SimpleNamespace(RTDEControlInterface=unavailable_robot))
+    monkeypatch.setitem(
+        sys.modules, "rtde_receive", SimpleNamespace(RTDEReceiveInterface=lambda *args: Receive())
+    )
+    monkeypatch.setattr(rr, "spawn", lambda **kwargs: None)
+    monkeypatch.setattr(rr, "log", broken_viewer)
+    shutdown = rr.rerun_shutdown
+    monkeypatch.setattr(rr, "rerun_shutdown", broken_viewer)
+    cfg = SimpleNamespace(
+        ENABLE_MOTION=True,
+        FPS=30,
+        NUM_EPISODES=1,
+        ROBOT=URConfig(robot_ip="test"),
+        TELEOP=XBotConfig(device="unused", calibration_path=str(path)),
+        DISPLAY_DATA=True,
+        DISPLAY_FPS=10,
+        DISPLAY_IP=None,
+        DISPLAY_PORT=None,
+    )
+    try:
+        with pytest.raises(ConnectionError, match="robot unavailable"):
+            module.run(cfg)
+    finally:
+        shutdown()
+
+
+@pytest.mark.viz
+def test_normal_exit_with_disconnect_failure_displays_fault(tmp_path, monkeypatch):
+    import importlib.util
+    import json
+    import sys
+    import time
+    from pathlib import Path
+    from types import SimpleNamespace
+
+    from lerobot.teleoperators.xbot import XBotConfig
+
+    rr = pytest.importorskip("rerun")
+    evdev = pytest.importorskip("evdev")
+    example_dir = Path(__file__).resolve().parents[2] / "examples/ur"
+    monkeypatch.syspath_prepend(str(example_dir))
+    spec = importlib.util.spec_from_file_location("ur_session_cleanup", example_dir / "session.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    calibration = {
+        "version": 1,
+        "backend": "evdev",
+        "device": {"name": "test", "vendor": 1, "product": 2},
+        "axes": {
+            name: {"code": i, "rest": 0, "positive": 100, "min": -100, "max": 100}
+            for i, name in enumerate(("lx", "ly", "rx", "ry", "lt", "rt", "yaw"))
+        },
+        "buttons": {name: 300 + i for i, name in enumerate(("rb", "lb", "a", "x", "menu", "y", "b", "view"))},
+    }
+    path = tmp_path / "calibration.json"
+    path.write_text(json.dumps(calibration))
+
+    class Receive(FakeReceive):
+        def getTimestamp(self):
+            return time.monotonic()
+
+        def disconnect(self):
+            pass
+
+    class Control:
+        def disconnect(self):
+            raise RuntimeError("disconnect failed")
+
+    class Input:
+        name = "test"
+        info = SimpleNamespace(vendor=1, product=2)
+
+        def __init__(self, *args):
+            self.started = time.monotonic()
+
+        def capabilities(self, **kwargs):
+            return {evdev.ecodes.EV_ABS: list(range(7)), evdev.ecodes.EV_KEY: list(range(300, 308))}
+
+        def absinfo(self, code):
+            return SimpleNamespace(value=0, min=-100, max=100)
+
+        def active_keys(self):
+            return [307] if time.monotonic() - self.started > 0.1 else []
+
+        def read(self):
+            return []
+
+        def close(self):
+            pass
+
+    monkeypatch.setitem(
+        sys.modules, "rtde_control", SimpleNamespace(RTDEControlInterface=lambda *a: Control())
+    )
+    monkeypatch.setitem(
+        sys.modules, "rtde_receive", SimpleNamespace(RTDEReceiveInterface=lambda *a: Receive())
+    )
+    monkeypatch.setattr(evdev, "InputDevice", Input)
+    monkeypatch.setattr(rr, "spawn", lambda **kwargs: None)
+    statuses = []
+    original = rr.log
+
+    def capture(path, entity=None, *args, **kwargs):
+        if path == "ur/status":
+            statuses.extend(entity.text.as_arrow_array().to_pylist())
+        return original(path, entity, *args, **kwargs)
+
+    monkeypatch.setattr(rr, "log", capture)
+    cfg = SimpleNamespace(
+        ENABLE_MOTION=True,
+        FPS=30,
+        NUM_EPISODES=1,
+        ROBOT=URConfig(robot_ip="test", mode="cartesian_position"),
+        TELEOP=XBotConfig(device="unused", calibration_path=str(path), view_hold_s=0.01),
+        DISPLAY_DATA=True,
+        DISPLAY_FPS=10,
+        DISPLAY_IP=None,
+        DISPLAY_PORT=None,
+        ROTATION=0.01,
+    )
+    with pytest.raises(RuntimeError, match="disconnect failed"):
+        module.run(cfg)
+    assert statuses[-1].startswith("# FAULT")
+    assert "disconnect failed" in statuses[-1]
+    assert "RB enabled: **False**" in statuses[-1]

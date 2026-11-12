@@ -56,7 +56,26 @@ def run(cfg, *, record=False):
     if cfg.FPS <= 0 or cfg.NUM_EPISODES <= 0:
         raise ValueError("Expected positive FPS and NUM_EPISODES")
     robot, teleop = UR(cfg.ROBOT), XBot(cfg.TELEOP)
+    from visualization import URRerunDisplay
+
+    display = URRerunDisplay(
+        enabled=cfg.DISPLAY_DATA, fps=cfg.DISPLAY_FPS, ip=cfg.DISPLAY_IP, port=cfg.DISPLAY_PORT
+    )
     dataset = None
+    phase, last_status, session_error = "WAITING", None, None
+
+    def show(observation=None, *, force=False):
+        nonlocal last_status
+        rb = bool(phase == "RUNNING" and active and teleop.driving)
+        diagnostics = robot.get_diagnostics()
+        if session_error:
+            diagnostics["error"] = session_error
+        status = (phase, rb, diagnostics["robot_mode"], diagnostics["safety_mode"])
+        if status != last_status:
+            logger.info("UR state=%s RB=%s robot=%s safety=%s", *status)
+            last_status = status
+        display.update(diagnostics, state=phase, rb=rb, observation=observation, force=force)
+
     active, needs_reset, frames, saved = False, True, 0, 0
     try:
         if record:
@@ -81,6 +100,8 @@ def run(cfg, *, record=False):
                 break
             if events & {"save", "discard"}:
                 robot.stop()
+                phase = "SAVING" if "save" in events and "discard" not in events else "DISCARDING"
+                show(observation, force=True)
                 if dataset is not None and frames:
                     if "discard" in events:
                         dataset.clear_episode_buffer()
@@ -95,6 +116,8 @@ def run(cfg, *, record=False):
             elif "start" in events:
                 robot.stop()
                 if not active and needs_reset:
+                    phase = "RESETTING"
+                    show(observation, force=True)
                     cfg.TASK.reset(robot)
                     needs_reset = False
                 active = not active
@@ -121,16 +144,52 @@ def run(cfg, *, record=False):
                     frames += 1
             else:
                 robot.stop()
+            phase = (
+                "RUNNING"
+                if active and teleop.driving
+                else ("PAUSED" if not active and not needs_reset else "WAITING")
+            )
+            show(observation)
             time.sleep(max(0.0, 1 / cfg.FPS - (time.monotonic() - started)))
-    finally:
-        # Stop motion before flushing video or releasing input devices.
+    except BaseException as error:
+        session_error = str(error)
+        phase = "STOPPED" if isinstance(error, KeyboardInterrupt) else "FAULT"
+        logger.error("UR session ended: %s", error)
+        # No viewer operation may delay the stop request on an exception.
         try:
-            robot.disconnect()
+            robot.stop()
         finally:
             try:
-                teleop.disconnect()
-            finally:
-                if dataset is not None:
-                    if frames:
-                        dataset.clear_episode_buffer()
-                    dataset.finalize()
+                show(force=True)
+            except Exception:
+                logger.exception("Could not publish final UR status")
+        raise
+    finally:
+        # Attempt all cleanup, retaining the first failure (robot stop has priority).
+        operations = [("robot disconnect", robot.disconnect), ("teleoperator disconnect", teleop.disconnect)]
+        if dataset is not None:
+            if frames:
+                operations.append(("discard unsaved episode", dataset.clear_episode_buffer))
+            operations.append(("finalize dataset", dataset.finalize))
+        cleanup_error = None
+        for label, operation in operations:
+            try:
+                operation()
+            except BaseException as error:
+                logger.exception("UR cleanup failed during %s", label)
+                if cleanup_error is None:
+                    cleanup_error = error
+        if cleanup_error is not None:
+            phase, session_error = "FAULT", str(cleanup_error)
+        elif phase != "FAULT":
+            phase = "STOPPED"
+        try:
+            show(force=True)
+        except Exception:
+            logger.exception("Could not publish final UR status")
+        try:
+            display.close()
+        except Exception:
+            logger.exception("Could not close Rerun")
+        if cleanup_error is not None:
+            raise cleanup_error

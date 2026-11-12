@@ -72,11 +72,19 @@ class RTDEController:
         self._receive_lock = threading.Lock()
         self._feedback_stamp = None
         self._feedback_time = 0.0
+        self._target_count = self._control_count = 0
+        self._robot_mode = self._safety_mode = None
+        self._wrench = None
+        self._wrench_time = None
 
     def connect(self) -> None:
         if self.control is not None or self.receive is not None:
             raise RuntimeError("Disconnect the existing UR connection before reconnecting")
         self._error = self._stop_error = None
+        with self._lock:
+            self._target_count = self._control_count = 0
+            self._robot_mode = self._safety_mode = None
+            self._wrench = self._wrench_time = None
         self._feedback_stamp = None
         self._feedback_time = 0.0
         import rtde_control
@@ -107,9 +115,12 @@ class RTDEController:
             raise RuntimeError("Expected connected UR RTDE receiver")
         if self._error is not None:
             raise RuntimeError("UR control loop failed; reconnect before continuing") from self._error
-        if self.receive.isProtectiveStopped() or self.receive.isEmergencyStopped():
-            raise RuntimeError("UR safety stop is active")
         with self._receive_lock:
+            robot_mode, safety_mode = self.receive.getRobotMode(), self.receive.getSafetyMode()
+            with self._lock:
+                self._robot_mode, self._safety_mode = robot_mode, safety_mode
+            if self.receive.isProtectiveStopped() or self.receive.isEmergencyStopped():
+                raise RuntimeError("UR safety stop is active")
             now, stamp = time.monotonic(), float(self.receive.getTimestamp())
             if not np.isfinite(stamp) or (self._feedback_stamp is not None and stamp < self._feedback_stamp):
                 raise ValueError("Expected finite monotonic UR feedback timestamp")
@@ -117,14 +128,18 @@ class RTDEController:
                 self._feedback_stamp, self._feedback_time = stamp, now
             elif now - self._feedback_time > self.config.command_timeout:
                 raise TimeoutError("UR feedback timestamp stopped advancing")
-            if self.receive.getSafetyMode() not in (1, 2) or self.receive.getRobotMode() != 7:
+            if safety_mode not in (1, 2) or robot_mode != 7:
                 raise RuntimeError("Expected running UR in normal or reduced safety mode")
-            return {
+            result = {
                 "joint": vector(self.receive.getActualQ(), "actual joints"),
                 "tcp": vector(self.receive.getActualTCPPose(), "actual TCP"),
                 "velocity": vector(self.receive.getActualTCPSpeed(), "actual TCP speed"),
                 "wrench": vector(self.receive.getActualTCPForce(), "actual wrench"),
             }
+            with self._lock:
+                self._wrench = result["wrench"].copy()
+                self._wrench_time = self._feedback_time
+            return result
 
     def send(self, target: np.ndarray) -> np.ndarray:
         state = self.state()
@@ -132,11 +147,27 @@ class RTDEController:
         accepted = limit_target(self.config, target, actual)
         with self._lock:
             self._target, self._stamp = accepted.copy(), time.monotonic()
+            self._target_count += 1
         if self._thread is None or not self._thread.is_alive():
             self._stop.clear()
             self._thread = threading.Thread(target=self._run, name="ur-rtde", daemon=True)
             self._thread.start()
         return accepted
+
+    def get_diagnostics(self) -> dict:
+        """Copy counters and last feedback without SDK reads or dataset fields."""
+        with self._lock:
+            now = time.monotonic()
+            return {
+                "sampled_at": now,
+                "target_count": self._target_count,
+                "control_count": self._control_count,
+                "robot_mode": self._robot_mode,
+                "safety_mode": self._safety_mode,
+                "wrench": None if self._wrench is None else self._wrench.copy(),
+                "feedback_age_s": None if self._wrench_time is None else now - self._wrench_time,
+                "error": str(self._error) if self._error is not None else None,
+            }
 
     def _write(self, target, state):
         cfg, control, dt = self.config, self.control, 1 / self.config.frequency
@@ -171,6 +202,8 @@ class RTDEController:
                 if time.monotonic() - stamp > self.config.command_timeout:
                     raise TimeoutError("UR command expired while reading feedback")
                 self._ok(self._write(target, state))
+                with self._lock:
+                    self._control_count += 1
                 self.control.waitPeriod(tick)
         except Exception as error:
             self._error = error

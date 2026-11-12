@@ -11,7 +11,7 @@
 ```bash
 cd /workspace/RLinf/external/lerobot
 uv pip install --python /opt/venv/lerobot/bin/python --torch-backend cu128 \
-  'torch==2.11.0+cu128' 'torchvision==0.26.0+cu128' -e '.[ur,xbot,robotiq,dataset]'
+  'torch==2.11.0+cu128' 'torchvision==0.26.0+cu128' -e '.[ur,xbot,robotiq,dataset,viz]'
 cd /workspace/RLinf
 /opt/venv/lerobot/bin/python external/lerobot/examples/ur/teleoperate.py
 /opt/venv/lerobot/bin/python external/lerobot/examples/ur/record.py
@@ -125,3 +125,30 @@ cd /workspace/RLinf/external/lerobot
 (0.2,0.2,0.2,0.05,0.05,0.3)。10 s 超时也用于检测反馈停滞；
 松开 RB 和正常退出仍立即请求停止。直接编辑 `config.py` 中的这些值即可。
 相机和任务复位仍独立配置。
+
+## Rerun 实时诊断
+
+在 `config.py` 中，`DISPLAY_DATA=True` 为遥操作和采集启用 LeRobot 官方 Rerun 后端。
+`DISPLAY_FPS=10` 限制界面更新频率，状态变化立即刷新。
+容器需要可用的 `DISPLAY` 和 X11 socket，当前 UR 容器已配置这两项。
+`DISPLAY_IP`、`DISPLAY_PORT` 同时为 `None` 时打开本地桌面窗口；连接远程 Rerun
+服务时同时填写两项。`DISPLAY_DATA=False` 关闭可视化。
+`viz` 依赖安装到独立 `/opt/venv/lerobot`，不使用 `gr00t`。
+
+界面包含四个面板，以及配置中启用的相机画面：
+
+- 频率：`target_hz` 为成功提交目标次数，`control_hz` 为成功执行 RTDE 命令次数，
+  除以一秒统计窗口内实际经过的单调时钟时间。不是配置的 30/500 Hz。
+  完整空闲窗口后归零；跨越停止时刻的窗口仍可能非零，第一个统计窗口显示零。
+- 测量力：基座系 Fx、Fy、Fz，单位 N。
+- 测量力矩：基座系 Tx、Ty、Tz，单位 Nm，包含未使能力控的轴。
+- 状态：WAITING/RUNNING/PAUSED/FAULT、实际 RB 使能状态、最近 UR 运行/安全状态及
+  反馈年龄。复位、保存、丢弃和退出显示 RESETTING/SAVING/DISCARDING/STOPPED。
+  不认识的 UR 状态保留数字代码；故障时保留最后反馈并显示其年龄，不当作实时反馈。
+
+六维力来自 RTDE `getActualTCPForce`，不是下发的期望力。
+不需要夹爪或相机，即使数据集设置 `include_wrench=False`，界面仍显示六维力。
+这些诊断字段不进入数据集。RTDE 线程只更新计数和反馈缓存，Rerun 调用位于示例主循环。
+终端只打印状态变化和异常，不逐帧刷屏。
+同步任务复位和视频保存期间不会持续刷新界面，界面保留对应操作状态直到操作返回。
+关闭 Rerun 窗口不等于停止机械臂；停止仍使用松开 RB、长按 View 或 Ctrl-C。
