@@ -71,7 +71,7 @@ def test_all_modes_dispatch():
 def test_xbot_processor_physical_action():
     from lerobot.teleoperators.xbot import to_ur_action
 
-    robot = UR(URConfig(robot_ip="test"))
+    robot = UR(URConfig(robot_ip="test", mode="cartesian_position"))
     observation = dict.fromkeys(robot.observation_features, 0.0)
     result = to_ur_action(
         robot,
@@ -120,7 +120,7 @@ def test_stalled_feedback_rejected():
 
     from lerobot.robots.ur.controller import RTDEController
 
-    controller = RTDEController(URConfig(robot_ip="test", command_timeout=0.01))
+    controller = RTDEController(URConfig(robot_ip="test", mode="cartesian_position", command_timeout=0.01))
     controller.receive = FakeReceive()
     controller.state()
     time.sleep(0.02)
@@ -164,7 +164,7 @@ def test_command_watchdog_stops_sdk():
         def getTimestamp(self):
             return time.monotonic()
 
-    controller = RTDEController(URConfig(robot_ip="test", command_timeout=0.01))
+    controller = RTDEController(URConfig(robot_ip="test", mode="cartesian_position", command_timeout=0.01))
     controller.receive, controller.control = Receiver(), SDK()
     controller.send(np.zeros(6))
     deadline = time.monotonic() + 1
@@ -182,7 +182,7 @@ def test_native_dataset_roundtrip(tmp_path):
     from lerobot.datasets.lerobot_dataset import LeRobotDataset
     from lerobot.utils.feature_utils import build_dataset_frame, hw_to_dataset_features
 
-    robot = UR(URConfig(robot_ip="test"))
+    robot = UR(URConfig(robot_ip="test", mode="cartesian_position"))
     features = hw_to_dataset_features(robot.observation_features, "observation")
     features.update(hw_to_dataset_features(robot.action_features, "action"))
     root = tmp_path / "dataset"
@@ -343,7 +343,7 @@ def test_no_expired_write_after_slow_feedback():
         def servoStop(self, *args):
             return True
 
-    controller = RTDEController(URConfig(robot_ip="test", command_timeout=0.01))
+    controller = RTDEController(URConfig(robot_ip="test", mode="cartesian_position", command_timeout=0.01))
     controller.receive, controller.control = Receiver(), SDK()
     controller.send(np.zeros(6))
     deadline = time.monotonic() + 1
@@ -371,7 +371,7 @@ def test_reconnect_clears_fault_and_feedback_epoch(monkeypatch):
     monkeypatch.setitem(
         sys.modules, "rtde_receive", SimpleNamespace(RTDEReceiveInterface=lambda *a: Receiver())
     )
-    controller = RTDEController(URConfig(robot_ip="test"))
+    controller = RTDEController(URConfig(robot_ip="test", mode="cartesian_position"))
     controller.connect()
     controller._error = TimeoutError("old failure")
     controller._feedback_stamp = 100
@@ -379,3 +379,21 @@ def test_reconnect_clears_fault_and_feedback_epoch(monkeypatch):
     controller.connect()
     assert controller.state()["tcp"].shape == (6,)
     controller.disconnect()
+
+
+def test_default_force_mode_and_critical_damping():
+    cfg = URConfig(robot_ip="test")
+    assert cfg.mode == "cartesian_force"
+    assert cfg.force.damping is None
+    np.testing.assert_allclose(cfg.force.resolved_damping, 2 * np.sqrt(cfg.force.stiffness))
+    cfg.force.stiffness = (0, 1, 4, 9, 16, 25)
+    np.testing.assert_allclose(cfg.force.resolved_damping, [0, 2, 4, 6, 8, 10])
+    force = force_wrench(cfg.force, np.zeros(6), np.zeros(6), np.full(6, 0.01))
+    np.testing.assert_allclose(force, -np.array([0, 2, 4, 6, 8, 10]) * 0.01)
+
+
+def test_explicit_damping_remains_supported():
+    cfg = ForceConfig(damping=(1, 2, 3, 4, 5, 6))
+    np.testing.assert_array_equal(cfg.resolved_damping, [1, 2, 3, 4, 5, 6])
+    with pytest.raises(ValueError):
+        ForceConfig(stiffness=(-1, 0, 0, 0, 0, 0))

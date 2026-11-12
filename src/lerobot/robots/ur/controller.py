@@ -51,7 +51,7 @@ def force_wrench(
         np.asarray(config.wrench)
         + np.r_[tcp_to_task.apply(config.tcp_wrench[:3]), tcp_to_task.apply(config.tcp_wrench[3:])]
     )
-    wrench = feedforward + np.asarray(config.stiffness) * error - np.asarray(config.damping) * speed
+    wrench = feedforward + np.asarray(config.stiffness) * error - config.resolved_damping * speed
     return np.clip(wrench, -np.asarray(config.max_wrench), config.max_wrench) * config.selection_vector
 
 

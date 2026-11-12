@@ -26,7 +26,7 @@ class ForceConfig:
     wrench: tuple = (0, 0, 0, 0, 0, 0)
     tcp_wrench: tuple = (0, 0, 0, 0, 0, 0)
     stiffness: tuple = (1200, 1200, 1200, 100, 100, 100)
-    damping: tuple = (70, 70, 70, 20, 20, 20)
+    damping: tuple | None = None
     max_wrench: tuple = (40, 40, 40, 2, 2, 2)
     limits: tuple = (0.2, 0.2, 0.2, 0.05, 0.05, 0.3)
     gain_scaling: float = 1.0
@@ -40,7 +40,6 @@ class ForceConfig:
             "wrench",
             "tcp_wrench",
             "stiffness",
-            "damping",
             "max_wrench",
             "limits",
         ):
@@ -48,11 +47,21 @@ class ForceConfig:
         if not np.isin(self.selection_vector, [0, 1]).all():
             raise ValueError("Expected binary force selection vector")
         for name in ("stiffness", "damping", "max_wrench", "limits"):
-            a = vector(getattr(self, name), name)
+            a = self.resolved_damping if name == "damping" else vector(getattr(self, name), name)
             if np.any(a < 0) or (name in ("max_wrench", "limits") and np.any(a == 0)):
                 raise ValueError(f"Expected positive bounds or nonnegative gains: {name}")
         if not 0 <= self.gain_scaling <= 2 or not 0 <= self.force_damping <= 1:
             raise ValueError("Expected gain scaling in [0,2] and force damping in [0,1]")
+
+    @property
+    def resolved_damping(self) -> np.ndarray:
+        """Return explicit gains or 2*sqrt(K), assuming unit mass/inertia."""
+        if self.damping is not None:
+            return vector(self.damping, "damping")
+        stiffness = vector(self.stiffness, "stiffness")
+        if np.any(stiffness < 0):
+            raise ValueError("Expected nonnegative stiffness for critical damping")
+        return 2 * np.sqrt(stiffness)
 
 
 @dataclass
@@ -67,7 +76,7 @@ class RobotiqConfig:
 @dataclass(kw_only=True)
 class URConfig(RobotConfig):
     robot_ip: str
-    mode: str = "cartesian_position"
+    mode: str = "cartesian_force"
     frequency: float = 500
     command_timeout: float = 0.5
     include_wrench: bool = True

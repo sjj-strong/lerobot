@@ -122,3 +122,12 @@ force-mode stability on a real UR.
 
 Task reset runs synchronously: gamepad events are not polled during reset.
 Use Ctrl-C or the robot stop controls to interrupt reset motion.
+
+The default mode is `cartesian_force`, selected by `ROBOT.mode` in `config.py`.
+Mode dispatch lives in `RTDEController._write` in `src/lerobot/robots/ur/controller.py`.
+`ForceConfig.damping=None` derives each host PD damping gain as `2*sqrt(K)`;
+changing stiffness also changes the derived damping. This is the critical-damping
+approximation for unit effective mass/inertia; in general D=2*sqrt(K*M).
+With default K=(1200,1200,1200,100,100,100), D is approximately
+(69.282,69.282,69.282,20,20,20). An explicit six-value damping tuple overrides it.
+`force_damping=0.3` is the separate native UR forceMode damping parameter.

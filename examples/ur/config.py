@@ -11,7 +11,7 @@ from lerobot.teleoperators.xbot import XBotConfig
 
 ROBOT = URConfig(
     robot_ip="169.254.138.15",
-    mode="cartesian_position",
+    mode="cartesian_force",
     cameras={},  # Optional: name -> OpenCVCameraConfig / RealSenseCameraConfig.
     gripper=None,  # Optional: RobotiqConfig(port='/dev/ttyUSB0').
     include_wrench=True,
@@ -25,7 +25,7 @@ TELEOP = XBotConfig(
 )
 TASK = Task()
 # Example replacement: PegInsertionTask(home_joints=(q1, q2, q3, q4, q5, q6)).
-# Set ROBOT.mode='cartesian_force' explicitly for a force-controlled task.
+# ROBOT.mode selects the control method; force.damping=None derives 2*sqrt(K).
 ENABLE_MOTION = False
 FPS = 30
 TRANSLATION = 0.002  # m/frame in position/force modes; m/s in velocity mode.

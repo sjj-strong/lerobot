@@ -109,3 +109,11 @@ cd /workspace/RLinf/external/lerobot
 测试使用 SDK 替身和临时数据集，不操作硬件，也不能证明真实 UR 的力控稳定性。
 
 任务复位同步执行，复位期间不读取手柄事件；此时使用 Ctrl-C 或机器人停止控制中断运动。
+
+默认模式为 `cartesian_force`，在 `config.py` 的 `ROBOT.mode` 中选择。
+模式分派位于 `src/lerobot/robots/ur/controller.py` 的 `RTDEController._write`。
+`ForceConfig.damping=None` 时按各轴 `D=2*sqrt(K)` 计算主机 PD 阻尼，
+修改刚度后阻尼同步变化。这是等效质量/惯量为 1 时的临界阻尼近似；
+一般形式为 `D=2*sqrt(K*M)`。默认 K=(1200,1200,1200,100,100,100)，
+对应 D 约为 (69.282,69.282,69.282,20,20,20)。仍可显式填写六维 damping 覆盖。
+`force_damping=0.3` 是另一项 UR 原生 forceMode 阻尼参数，不参与这个计算。
