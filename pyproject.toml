@@ -181,6 +181,11 @@ motorbridge-dep = ["motorbridge>=0.5,<0.6"]
 motorbridge-smart-servo-dep = ["motorbridge-smart-servo>=0.0.4,<0.1.0"]
 timm-dep = ["timm>=1.0.0,<1.1.0"]
 
+# UR and calibrated Linux gamepad
+ur = ["ur-rtde>=1.6.5,<2.0", "lerobot[scipy-dep]"]
+xbot = ["evdev>=1.9,<2.0; sys_platform == 'linux'", "lerobot[scipy-dep]"]
+robotiq = ["pymodbus>=3.10,<4.0", "lerobot[pyserial-dep]"]
+
 # Motors
 # rustypot drives Feetech and Dynamixel motors; pyserial is for `lerobot-find-port`, the first step of every
 # arm setup guide. `feetech` and `dynamixel` are the names the setup guides use.
