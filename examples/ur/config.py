@@ -6,7 +6,7 @@ from pathlib import Path
 
 from tasks import Task
 
-from lerobot.robots.ur import URConfig
+from lerobot.robots.ur import ForceConfig, URConfig
 from lerobot.teleoperators.xbot import XBotConfig
 
 ROBOT = URConfig(
@@ -15,8 +15,24 @@ ROBOT = URConfig(
     cameras={},  # Optional: name -> OpenCVCameraConfig / RealSenseCameraConfig.
     gripper=None,  # Optional: RobotiqConfig(port='/dev/ttyUSB0').
     include_wrench=True,
-    payload_mass=None,  # None preserves the UR controller payload setting.
-    payload_cog=(0.0, 0.0, 0.0),
+    # RLinf realworld_ur_peginsertion_collect_data.yaml arm settings.
+    frequency=500.0,
+    command_timeout=10.0,
+    payload_mass=1.8,
+    payload_cog=(0.0, 0.0, 0.066),
+    force=ForceConfig(
+        task_frame=(0, 0, 0, 0, 0, 0),
+        selection_vector=(1, 1, 1, 0, 0, 1),
+        wrench=(0, 0, 0, 0, 0, 0),
+        tcp_wrench=(0, 0, 0, 0, 0, 0),
+        stiffness=(1200, 1200, 1200, 2000, 2000, 2000),
+        damping=None,
+        max_wrench=(40, 40, 40, 4, 4, 4),
+        limits=(0.2, 0.2, 0.2, 0.05, 0.05, 0.3),
+        gain_scaling=1.5,
+        force_damping=0.15,
+        zero_ft_sensor=True,
+    ),
 )
 TELEOP = XBotConfig(
     device="/dev/input/by-id/usb-Zikway_HID_gamepad-event-joystick",

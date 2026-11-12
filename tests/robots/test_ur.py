@@ -389,7 +389,7 @@ def test_default_force_mode_and_critical_damping():
     cfg.force.stiffness = (0, 1, 4, 9, 16, 25)
     np.testing.assert_allclose(cfg.force.resolved_damping, [0, 2, 4, 6, 8, 10])
     force = force_wrench(cfg.force, np.zeros(6), np.zeros(6), np.full(6, 0.01))
-    np.testing.assert_allclose(force, -np.array([0, 2, 4, 6, 8, 10]) * 0.01)
+    np.testing.assert_allclose(force, -np.array([0, 2, 4, 6, 8, 10]) * 0.01 * cfg.force.selection_vector)
 
 
 def test_explicit_damping_remains_supported():

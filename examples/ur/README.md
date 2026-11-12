@@ -59,7 +59,8 @@ xyz/rotation-vector, `wrench` is a task-frame 6D feedforward wrench, and
 `tcp_wrench` is a wrench in the **current** TCP frame. Each cycle rotates the TCP
 wrench into the task frame, adds the pose-error PD wrench, clips to `max_wrench`,
 and applies `selection_vector`. The order is Fx, Fy, Fz, Tx, Ty, Tz (N and Nm).
-Defaults use zero feedforward, six selected axes, no automatic sensor zeroing.
+Defaults match RLinf peg-insertion collection: zero feedforward, selected axes
+(1,1,1,0,0,1), and sensor zeroing once on connection.
 Set `stiffness`, `damping`, `limits`, `max_wrench`, `gain_scaling` and
 `force_damping` to your validated hardware values before a force experiment;
 the example gains are not hardware tuning results. Setting zero feedforward
@@ -128,6 +129,14 @@ Mode dispatch lives in `RTDEController._write` in `src/lerobot/robots/ur/control
 `ForceConfig.damping=None` derives each host PD damping gain as `2*sqrt(K)`;
 changing stiffness also changes the derived damping. This is the critical-damping
 approximation for unit effective mass/inertia; in general D=2*sqrt(K*M).
-With default K=(1200,1200,1200,100,100,100), D is approximately
-(69.282,69.282,69.282,20,20,20). An explicit six-value damping tuple overrides it.
-`force_damping=0.3` is the separate native UR forceMode damping parameter.
+With default K=(1200,1200,1200,2000,2000,2000), D is approximately
+(69.282,69.282,69.282,89.443,89.443,89.443). An explicit six-value damping tuple overrides it.
+`force_damping=0.15` is the separate native UR forceMode damping parameter.
+
+The example explicitly lists the arm settings from RLinf
+`examples/embodiment/config/ur/realworld_ur_peginsertion_collect_data.yaml`:
+500 Hz, 10 s command timeout, 1.8 kg payload, CoG (0,0,0.066) m;
+force gain scaling 1.5, max wrench (40,40,40,4,4,4), and limits
+(0.2,0.2,0.2,0.05,0.05,0.3). The 10 s timeout also bounds stale-feedback detection;
+RB release and normal exit still request an immediate stop. Change these values
+directly in `config.py`. Cameras and task reset remain separately configurable.

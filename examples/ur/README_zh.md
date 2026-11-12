@@ -55,7 +55,7 @@ RealSense 需要安装 `.[intelrealsense]`。`gripper=None` 不连接夹爪，�
 `wrench` 是任务坐标系六维前馈力，`tcp_wrench` 是**当前 TCP 坐标系**六维前馈力。
 每周期旋转 TCP 力到任务坐标系，加上位姿误差 PD，按 `max_wrench` 限幅后应用
 `selection_vector`。顺序是 Fx、Fy、Fz、Tx、Ty、Tz，单位为 N、Nm。
-默认前馈为零、六轴选中、不自动清零力传感器。
+默认采用 RLinf 插孔采集参数：前馈为零，使能为 (1,1,1,0,0,1)，连接时清零一次力传感器。
 真实力控前，需要在配置中填写经过硬件验证的 `stiffness`、`damping`、`limits`、
 `max_wrench`、`gain_scaling` 和 `force_damping`；示例增益不是实际调参结论。
 前馈为零不代表没有位姿 PD 力；停止时退出 force mode，同时结束前馈。
@@ -114,6 +114,14 @@ cd /workspace/RLinf/external/lerobot
 模式分派位于 `src/lerobot/robots/ur/controller.py` 的 `RTDEController._write`。
 `ForceConfig.damping=None` 时按各轴 `D=2*sqrt(K)` 计算主机 PD 阻尼，
 修改刚度后阻尼同步变化。这是等效质量/惯量为 1 时的临界阻尼近似；
-一般形式为 `D=2*sqrt(K*M)`。默认 K=(1200,1200,1200,100,100,100)，
-对应 D 约为 (69.282,69.282,69.282,20,20,20)。仍可显式填写六维 damping 覆盖。
-`force_damping=0.3` 是另一项 UR 原生 forceMode 阻尼参数，不参与这个计算。
+一般形式为 `D=2*sqrt(K*M)`。默认 K=(1200,1200,1200,2000,2000,2000)，
+对应 D 约为 (69.282,69.282,69.282,89.443,89.443,89.443)。仍可显式填写六维 damping 覆盖。
+`force_damping=0.15` 是另一项 UR 原生 forceMode 阻尼参数，不参与这个计算。
+
+示例显式列出了 RLinf 的
+`examples/embodiment/config/ur/realworld_ur_peginsertion_collect_data.yaml`
+机械臂参数：500 Hz、命令超时 10 s、负载 1.8 kg、重心 (0,0,0.066) m；
+力控增益 1.5、最大力/力矩 (40,40,40,4,4,4)，limits 为
+(0.2,0.2,0.2,0.05,0.05,0.3)。10 s 超时也用于检测反馈停滞；
+松开 RB 和正常退出仍立即请求停止。直接编辑 `config.py` 中的这些值即可。
+相机和任务复位仍独立配置。

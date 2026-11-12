@@ -22,16 +22,16 @@ def vector(value, name, size=6):
 @dataclass
 class ForceConfig:
     task_frame: tuple = (0, 0, 0, 0, 0, 0)
-    selection_vector: tuple = (1, 1, 1, 1, 1, 1)
+    selection_vector: tuple = (1, 1, 1, 0, 0, 1)
     wrench: tuple = (0, 0, 0, 0, 0, 0)
     tcp_wrench: tuple = (0, 0, 0, 0, 0, 0)
-    stiffness: tuple = (1200, 1200, 1200, 100, 100, 100)
+    stiffness: tuple = (1200, 1200, 1200, 2000, 2000, 2000)
     damping: tuple | None = None
-    max_wrench: tuple = (40, 40, 40, 2, 2, 2)
+    max_wrench: tuple = (40, 40, 40, 4, 4, 4)
     limits: tuple = (0.2, 0.2, 0.2, 0.05, 0.05, 0.3)
-    gain_scaling: float = 1.0
-    force_damping: float = 0.3
-    zero_ft_sensor: bool = False
+    gain_scaling: float = 1.5
+    force_damping: float = 0.15
+    zero_ft_sensor: bool = True
 
     def __post_init__(self):
         for name in (
